@@ -14,6 +14,8 @@ import           Graphics.Gloss.Interface.IO.Simulate as G
 import           System.Random                        as R
 import           VTVar
 
+import Data.Maybe(fromJust)
+
 data Ant = Ant
   { antPos       :: VTVar G.Point
   , antHealth    :: VTVar Int
@@ -56,27 +58,30 @@ type WorldV = VTVar World
 
 type RandomV = VTVar StdGen
 
+
 mkRandomV :: IO RandomV
 mkRandomV = do
     stdgen <- getStdGen
-    S.atomically $ newVTVar stdgen
+    runWSTM $ atomicallyW $ newVTVar stdgen
 
 mkHomeV :: RandomV-> IO HomeV
-mkHomeV rndV = blockVTVarIO read calc write
+mkHomeV rndV = fromJust . snd <$> rcuVTVar read calc write
   where
-    read :: STM (RandomV, VTVarI StdGen)
+    read :: RSTM (RandomV, VTVarI StdGen)
     read = do
-      gI <- readVTVar rndV
+      gI <- atomicallyR $ readVTVar rndV
       return ( rndV, gI)
-    calc:: (RandomV, VTVarI StdGen)-> IO (HomeV, Maybe (RandomV, VTVarI StdGen))
-    calc (g, (g0, gV)) = do
+    calc:: (RandomV, VTVarI StdGen)-> ((), Maybe ((RandomV, VTVarI StdGen),Home))
+    calc (g, (g0, gV)) =
       let (newPos,g1) = random g0
-      ret <- S.atomically $ newVTVar Home
-        { hPos = newPos
-        , hSize = (40.0, 40.0)
-        }
-      return (ret, Just (g, (g1, gV)))
-    write (g, gI) = writeVTVar g gI
+          home = Home
+            { hPos = newPos
+            , hSize = (40.0, 40.0)
+            }
+      in ((), Just ((g, (g1, gV)),home))
+    write ((g, gI), home) = do
+      writeVTVar g gI
+      newVTVar home
 
 
 
@@ -141,7 +146,7 @@ makeState :: IO WorldV
 makeState = do
     stdgenV <- mkRandomV
     homeV <- mkHomeV stdgenV
-    S.atomically $ newVTVar World
+    runWSTM $ atomicallyW $ newVTVar World
       { wStdGen = stdgenV
       , wHome = homeV
       }
@@ -149,15 +154,15 @@ makeState = do
 drawHome
   :: WorldV
   -> IO Picture
-drawHome worldT = blockVTVarIO readVar calc (\_ -> return ())
+drawHome worldT = fst <$> rcuVTVar readVar calc ( const $ return ())
   where
-    readVar :: STM Home
-    readVar = do
-      (world, _) <- readVTVar worldT
-      (home, _ ) <- readVTVar $ wHome world
-      return home
-    calc :: Home-> IO (Picture, Maybe ())
-    calc home = return (payload, Nothing)
+    readVar :: RSTM Home
+    readVar = atomicallyR $ do
+        (world, _) <- readVTVar worldT
+        (home, _ ) <- readVTVar $ wHome world
+        return home
+    calc :: Home-> (Picture, Maybe ())
+    calc home = (payload, Nothing)
       where
         payload = G.pictures
           [ G.line [ (x0,y0), (x1, y0), (x1,y1), (x0, y1), (x0, y0)]
