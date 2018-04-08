@@ -27,6 +27,7 @@ import qualified Control.Concurrent.STM.TVar as S (newTVar, readTVar, writeTVar)
 import           Control.Exception.Base      (Exception, SomeException (..))
 import           Control.Monad               (Monad (..), when)
 
+import           Control.Monad.Catch         (MonadCatch)
 import           Control.Monad.Catch         as E (throwM, try)
 import           Control.Monad.IO.Class      as IO (MonadIO, liftIO)
 import           Control.Monad.Trans         (lift)
@@ -161,19 +162,22 @@ atomicallyR action = RSTM $ S.atomically $ runReadSTM action
  - possible, to not impact application's performance
  -}
 rcuVTVar
-    :: RSTM vars
-    -> ( vars-> (a, Maybe modifiedVars))
-    -> ( modifiedVars-> WriteSTM b)
-    -> IO (a, Maybe b)
+  :: ( MonadIO m
+     , MonadCatch m
+     )
+  => RSTM vars
+  -> ( vars-> (a, Maybe modifiedVars))
+  -> ( modifiedVars-> WriteSTM b)
+  -> m (a, Maybe b)
 rcuVTVar readvarsM workerM transactionM = loop
   where
     loop = do
-      vars <- runRSTM readvarsM
+      vars <- liftIO $ runRSTM readvarsM
       let (value, mmodifiedVars) = workerM vars
       case mmodifiedVars of
         Nothing-> return (value, Nothing)
         Just modifiedVars -> do
-          eres <- E.try $ runWSTM $ atomicallyW $ transactionM modifiedVars
+          eres <- E.try $ liftIO $ runWSTM $ atomicallyW $ transactionM modifiedVars
           case eres of
             Left VTVarAlreadyChanged -> loop
             Right some               -> return (value, Just some)
@@ -182,17 +186,20 @@ rcuVTVar readvarsM workerM transactionM = loop
  - the same as rcuVTVars, but calculate step is included in the readvars stage
  -}
 ruVTVar
-  :: RSTM (a, Maybe modifyVars)
+  :: ( MonadIO m
+     , MonadCatch m
+     )
+  => RSTM (a, Maybe modifyVars)
   -> (modifyVars-> WriteSTM b)
-  -> IO (a, Maybe b)
+  -> m (a, Maybe b)
 ruVTVar readvarsM writevarsM = loop
   where
     loop = do
-      (value, mmodifiedVars) <- runRSTM readvarsM
+      (value, mmodifiedVars) <- liftIO $ runRSTM readvarsM
       case mmodifiedVars of
         Nothing-> return (value, Nothing)
         Just modifiedVars -> do
-          eres <- E.try $ runWSTM $ atomicallyW $ writevarsM modifiedVars
+          eres <- E.try $ liftIO $ runWSTM $ atomicallyW $ writevarsM modifiedVars
           case eres of
             Left VTVarAlreadyChanged -> loop
             Right some               -> return (value, Just some)

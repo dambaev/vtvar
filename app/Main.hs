@@ -14,7 +14,7 @@ import           Graphics.Gloss.Interface.IO.Simulate as G
 import           System.Random                        as R
 import           VTVar
 
-import Data.Maybe(fromJust)
+import           Data.Maybe                           (fromJust)
 
 data Ant = Ant
   { antPos       :: VTVar G.Point
