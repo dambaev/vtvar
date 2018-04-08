@@ -15,7 +15,7 @@ module VTVar
   , atomicallyR
   , runWSTM
   , runRSTM
-  , RSTM
+  , RSTM(RSTM)
   , WSTM
   )
     where
@@ -64,6 +64,14 @@ newtype ReadSTM a = ReadSTM { runReadSTM:: STM a}
 
 {--| RSTM a
  - RSTM is a subset of IO, that is only allowed to use atomicallyR action
+ - RSTM constructor is in export list too, because there are many cases, when
+ - you need to rely on some real world data, that can be changed during replaying
+ - of transactions. For example, you need to know the precise current time, but
+ - if there were 10 replays, then time can be changed already and your assumptions
+ - will be wrong. I am not going to do Trans instances to allow to use liftIO,
+ - because you can accidently copy-paste "liftIO $ writeFile ..." in RSTM, which
+ - will be wrong. Instead, I want you to understand, that this is supposed to be
+ - Read-only IO monad, so you need to write "RSTM $ getCurrentTime" manually.
  -}
 newtype RSTM a = RSTM {runRSTM:: IO a}
   deriving
